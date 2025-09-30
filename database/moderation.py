@@ -13,7 +13,8 @@ from database import database, session
 class ActionType(Enum):
     kick = AuditLogAction.kick
     ban = AuditLogAction.ban
-    unban = AuditLogAction.unban
+    unban = (AuditLogAction.unban,)
+    temp_ban = 1000  # Custom action type for temporary bans
 
 
 class ModerationDB(database.base):  # type: ignore
@@ -24,11 +25,18 @@ class ModerationDB(database.base):  # type: ignore
     author_id: Mapped[str] = mapped_column(nullable=False)
     datetime: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     reason: Mapped[str] = mapped_column(nullable=True)
-    action_type: Mapped[ActionType] = mapped_column(nullable=False)
+    action_type: Mapped[ActionType] = (mapped_column(nullable=False),)
+    until: Mapped[int] = mapped_column(nullable=True)
 
     @classmethod
     def add_action_log(
-        cls, target_id: str, author_id: str, datetime: datetime, reason: str, action_type: ActionType
+        cls,
+        target_id: str,
+        author_id: str,
+        datetime: datetime,
+        reason: str,
+        action_type: ActionType,
+        until: int | None = None,
     ) -> None:
         item = cls(
             target_id=target_id,
@@ -36,6 +44,7 @@ class ModerationDB(database.base):  # type: ignore
             datetime=datetime,
             reason=reason,
             action_type=action_type,
+            until=until,
         )
         session.add(item)
         session.commit()

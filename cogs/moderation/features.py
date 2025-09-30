@@ -5,6 +5,7 @@ import disnake
 
 import utils
 
+from .messages_cz import MessagesCZ
 from .views import View
 
 SLOWMODE_CHANNEL_TYPES: TypeAlias = (
@@ -81,3 +82,105 @@ async def log(
     embed.add_field(name="New value", value=f"{curr_delay} seconds")
     embed.timestamp = datetime.now(tz=timezone.utc)
     await log_channel.send(embed=embed)
+
+
+async def temp_ban(
+    inter: disnake.GuildCommandInteraction,
+    user: disnake.Member,
+    duration: str,
+    reason: str,
+    config,
+):
+    """
+    Temporarily ban a user
+    """
+    # Parse duration
+    # seconds = utils.time.parse_time(duration)
+    seconds = 0
+    if seconds is None:
+        await inter.edit_original_response(MessagesCZ.invalid_duration_format)
+        return
+
+    # Check if duration is within limits
+    if seconds < 60 or seconds > 315360000:  # Between 1 minute and 10 years
+        await inter.edit_original_response(MessagesCZ.duration_limits)
+        return
+
+    # Calculate unban time
+    # unban_time = datetime.now(tz=timezone.utc).timestamp() + seconds
+    reason = f"{reason} ({duration})"
+    # Ban the user
+    try:
+        await user.ban(reason=reason)
+    except disnake.Forbidden:
+        await inter.edit_original_response(MessagesCZ.ban_permission_error)
+        return
+    except disnake.HTTPException:
+        await inter.edit_original_response(MessagesCZ.ban_failed)
+        return
+
+    # Log the ban in the database (pseudo-code, replace with actual DB logic)
+    # db.bans.insert_one({"user_id": user.id, "unban_time": unban_time, "reason": reason, "banned_by": inter.author.id})
+
+    await inter.edit_original_response(
+        MessagesCZ.temp_ban_success(user_mention=user.mention, duration=duration)
+    )
+
+
+async def perm_ban(
+    inter: disnake.GuildCommandInteraction,
+    user: disnake.Member,
+    reason: str,
+    config,
+):
+    """
+    Permanently ban a user
+    """
+    if (
+        (reason is not None)
+        and reason.split()[-1].startswith("(")
+        and reason.split()[-1].endswith(")")
+        and reason.split()[-1][1:-1].isdigit()
+    ):
+        await inter.edit_original_response(MessagesCZ.perm_ban_bracket_error)
+        return
+    try:
+        await user.ban(reason=reason)
+    except disnake.Forbidden:
+        await inter.edit_original_response(MessagesCZ.ban_permission_error)
+        return
+    except disnake.HTTPException:
+        await inter.edit_original_response(MessagesCZ.ban_failed)
+        return
+
+    # Log the permanent ban in the database (pseudo-code, replace with actual DB logic)
+    # db.bans.insert_one({"user_id": user.id, "unban_time": None, "reason": reason, "banned_by": inter.author.id})
+
+    await inter.edit_original_response(MessagesCZ.perm_ban_success(user_mention=user.mention))
+
+
+async def unban(
+    inter: disnake.GuildCommandInteraction,
+    user: disnake.User,
+    reason: str,
+    config,
+):
+    """
+    Unban a user
+    """
+    try:
+        await inter.guild.unban(user, reason=reason)
+    except disnake.NotFound:
+        await inter.edit_original_response(MessagesCZ.invalid_user(user_id=user.id))
+        return
+    except disnake.Forbidden:
+        await inter.edit_original_response(MessagesCZ.ban_permission_error)
+        return
+    except disnake.HTTPException:
+        await inter.edit_original_response(MessagesCZ.ban_failed)
+        return
+
+    # Log the unban in the database (pseudo-code, replace with actual DB logic)
+    # db.bans.delete_one({"user_id": user.id})
+
+    await inter.edit_original_response(MessagesCZ.unban_success(user_mention=user.mention))

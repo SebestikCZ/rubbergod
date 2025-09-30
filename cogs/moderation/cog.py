@@ -57,6 +57,41 @@ class Moderation(Base, commands.Cog):
         await features.log(inter, prev_delay, curr_delay=0, channel=channel, log_channel=self.log_channel)
         await inter.edit_original_response(MessagesCZ.remove_success(channel=channel.mention))
 
+    @PermissionsCheck.is_submod_plus()
+    @commands.slash_command(name="ban")
+    async def _ban(self, inter: disnake.GuildCommandInteraction):
+        await inter.response.defer(ephemeral=True)
+
+    @_ban.sub_command(name="temp", description=MessagesCZ.temp_ban_brief)
+    async def temp(
+        self,
+        inter: disnake.GuildCommandInteraction,
+        user: disnake.Member = commands.Param(description=MessagesCZ.user_param),
+        duration: str = commands.Param(description=MessagesCZ.duration_param),
+        reason: str = commands.Param(description=MessagesCZ.reason_param, default="No reason provided."),
+    ):
+        await features.temp_ban(inter, user, duration, reason, self.config)
+
+    @_ban.sub_command(name="permanent", description=MessagesCZ.perm_ban_brief)
+    async def permanent(
+        self,
+        inter: disnake.GuildCommandInteraction,
+        user: disnake.Member = commands.Param(description=MessagesCZ.user_param),
+        reason: str = commands.Param(description=MessagesCZ.reason_param, default="No reason provided."),
+    ):
+        await features.perm_ban(inter, user, reason, self.config)
+
+    @PermissionsCheck.is_submod_plus()
+    @commands.slash_command(name="unban", description=MessagesCZ.unban_brief)
+    async def _unban(
+        self,
+        inter: disnake.GuildCommandInteraction,
+        user: disnake.User,
+        reason: str = commands.Param(default="No reason provided."),
+    ):
+        await inter.response.defer(ephemeral=True)
+        await features.unban(inter, user, reason, self.config)
+
     @commands.Cog.listener()
     async def on_message(self, message: disnake.Message):
         """Logs use of @mod, @submod and @helper tag and send message to designated room"""
@@ -102,7 +137,7 @@ class Moderation(Base, commands.Cog):
         if entry.action not in (
             disnake.AuditLogAction.kick,
             disnake.AuditLogAction.ban,
-            disnake.AuditLogAction.unban,
+            # disnake.AuditLogAction.unban,
         ):
             # We only care about kicks and (un)bans
             return
@@ -115,10 +150,14 @@ class Moderation(Base, commands.Cog):
             action_emoji = "🔨"
             action_name = "banned"
             action_type = ActionType.ban
-        elif entry.action == disnake.AuditLogAction.unban:
-            action_emoji = "🔓"
-            action_name = "unbanned"
-            action_type = ActionType.unban
+            if (entry.reason is not None) and entry.reason.split()[-1].startswith("("):
+                action_name = "temporarily banned"
+                action_type = ActionType.temp_ban
+                return
+        # elif entry.action == disnake.AuditLogAction.unban:
+        #    action_emoji = "🔓"
+        #    action_name = "unbanned"
+        #    action_type = ActionType.unban
 
         timestamp = disnake.utils.format_dt(entry.created_at)
 
@@ -126,9 +165,21 @@ class Moderation(Base, commands.Cog):
         if isinstance(target, disnake.Object):
             target = await self.bot.fetch_user(target.id)
 
-        content = MessagesCZ.moderation_log(
-            entry=entry, target=target, action_emoji=action_emoji, action=action_name, timestamp=timestamp
-        )
+        if action_type == ActionType.temp_ban:
+            duration = entry.reason.split()[-1][1:-1]
+            entry.reason = " ".join(entry.reason.split()[:-1])
+            content = MessagesCZ.moderation_log_tempban(
+                entry=entry,
+                target=target,
+                action_emoji=action_emoji,
+                action=action_name,
+                timestamp=timestamp,
+                duration=duration,
+            )
+        else:
+            content = MessagesCZ.moderation_log(
+                entry=entry, target=target, action_emoji=action_emoji, action=action_name, timestamp=timestamp
+            )
 
         flags = disnake.MessageFlags(suppress_notifications=True)
         ModerationDB.add_action_log(
@@ -137,5 +188,8 @@ class Moderation(Base, commands.Cog):
             datetime=entry.created_at,
             reason=entry.reason,
             action_type=action_type,
+            until=None
+            if action_type != ActionType.temp_ban
+            else int(disnake.utils.utcnow().timestamp()) + int(duration[:-1]),
         )
         await self.moderation_channel.send(content=content, flags=flags)
